@@ -1,0 +1,8 @@
+.env
+
+# Arquivos temporários de editor
+*~
+*.swp
+*.swo
+.#*
+\#*\#

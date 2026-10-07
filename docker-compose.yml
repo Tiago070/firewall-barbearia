@@ -1,1 +1,69 @@
-# preenchido na etapa 2
+services:
+  firewall:
+    build:
+      context: ./firewall
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    networks:
+      lan:
+        ipv4_address: 172.16.0.254
+      dmz:
+        ipv4_address: 172.20.0.254
+
+  cliente:
+    build:
+      context: ./cliente
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      - firewall
+    extra_hosts:
+      - "dmz-web:172.20.0.10"
+      - "dmz-db:172.20.0.20"
+    command:
+      - /bin/sh
+      - -c
+      - ip route replace 172.20.0.0/24 via 172.16.0.254 && exec sleep infinity
+    networks:
+      lan:
+        ipv4_address: 172.16.0.10
+
+  dmz-web:
+    image: nginx:alpine
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      - firewall
+    command:
+      - /bin/sh
+      - -c
+      - ip route replace 172.16.0.0/24 via 172.20.0.254 && exec nginx -g 'daemon off;'
+    networks:
+      dmz:
+        ipv4_address: 172.20.0.10
+
+  dmz-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Copie .env.example para .env e defina POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Copie .env.example para .env e defina POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Copie .env.example para .env e defina POSTGRES_PASSWORD}
+    networks:
+      dmz:
+        ipv4_address: 172.20.0.20
+
+networks:
+  lan:
+    name: lan
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.16.0.0/24
+  dmz:
+    name: dmz
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24

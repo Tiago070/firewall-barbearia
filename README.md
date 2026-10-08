@@ -9,11 +9,18 @@ Ambiente inicial para simular uma rede segmentada de uma barbearia com Docker Co
 
 # Como executar
 
-No PowerShell, copie o arquivo de exemplo e inicie os serviços:
+Copie o arquivo de exemplo para `.env` e inicie os serviços:
 
 ```powershell
 Copy-Item .env.example .env
-docker compose up --build -d
+docker compose up -d --build
+```
+
+No Linux ou macOS:
+
+```sh
+cp .env.example .env
+docker compose up -d --build
 ```
 
 # Topologia
@@ -23,7 +30,7 @@ docker compose up --build -d
 | lan | 172.16.0.0/24 | cliente: 172.16.0.10; firewall: 172.16.0.254 |
 | dmz | 172.20.0.0/24 | dmz-web: 172.20.0.10; dmz-db: 172.20.0.20; firewall: 172.20.0.254 |
 
-O cliente e o servidor web usam rotas estáticas pelo firewall. O PostgreSQL não recebe `NET_ADMIN`: o gateway da bridge Docker pode encaminhar as respostas por um caminho assimétrico. Na etapa de regras, deve-se configurar SNAT no firewall para que as respostas do banco retornem pelo firewall. Isso faz o banco registrar o endereço do firewall como origem, em vez do IP original do cliente.
+O cliente e o servidor web usam rotas estáticas pelo firewall. O `dmz-db` não tem rota para a LAN de propósito, pois nenhum tráfego da LAN para o banco é permitido.
 
 # Testes
 

@@ -1,8 +1,9 @@
 FROM alpine:3.22
 
-# O iproute2 permite inspecionar interfaces e rotas nesta etapa inicial.
-# O iptables e o tcpdump ficam disponíveis para as etapas futuras de filtragem e diagnóstico.
-# O coreutils fornece `sleep infinity`, solicitado para manter o contêiner ativo.
+# O coreutils fornece o sleep com suporte ao argumento infinity usado para manter o contêiner ativo.
+# O iproute2 fornece ip addr e ip route para inspecionar interfaces, endereços e rotas.
+# O iptables prepara o utilitário para configurar regras Netfilter em uma etapa posterior.
+# O tcpdump permite capturar pacotes e diagnosticar o tráfego entre as redes.
 RUN apk add --no-cache coreutils iproute2 iptables tcpdump
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

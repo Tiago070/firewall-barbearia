@@ -36,6 +36,8 @@ services:
       - NET_ADMIN
     depends_on:
       - firewall
+    volumes:
+      - ./dmz/web:/usr/share/nginx/html:ro
     command:
       - /bin/sh
       - -c
@@ -53,16 +55,18 @@ services:
     networks:
       dmz:
         ipv4_address: 172.20.0.20
+    volumes:
+      - ./dmz/db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
 
 networks:
   lan:
-    name: lan
+    name: barbearia-lan
     driver: bridge
     ipam:
       config:
         - subnet: 172.16.0.0/24
   dmz:
-    name: dmz
+    name: barbearia-dmz
     driver: bridge
     ipam:
       config:

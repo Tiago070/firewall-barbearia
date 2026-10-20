@@ -1,0 +1,134 @@
+# Evidências: firewall depois das regras
+Gerado em: 2026-10-19 22:51:34 -0300
+
+### Containers em execução
+$ docker compose ps
+NAME                            IMAGE                         COMMAND                  SERVICE    CREATED              STATUS          PORTS
+firewall-barbearia-cliente-1    firewall-barbearia-cliente    "/bin/sh -c 'ip rout…"   cliente    About a minute ago   Up 32 seconds   
+firewall-barbearia-dmz-db-1     postgres:16-alpine            "docker-entrypoint.s…"   dmz-db     11 days ago          Up 9 hours      5432/tcp
+firewall-barbearia-dmz-web-1    nginx:alpine                  "/docker-entrypoint.…"   dmz-web    11 days ago          Up 9 hours      80/tcp
+firewall-barbearia-firewall-1   firewall-barbearia-firewall   "/usr/local/bin/entr…"   firewall   29 seconds ago       Up 27 seconds   
+[código de saída: 0]
+
+### Regras no início
+$ docker compose exec -T firewall iptables -L -n -v -x --line-numbers
+Chain INPUT (policy DROP 0 packets, 0 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination         
+1           0        0 ACCEPT     all  --  lo     *       0.0.0.0/0            0.0.0.0/0           
+2           0        0 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate INVALID
+3           0        0 ACCEPT     all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+
+Chain FORWARD (policy DROP 0 packets, 0 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination         
+1           0        0 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate INVALID
+2           0        0 DROP       tcp  --  *      *       172.16.0.0/24        172.20.0.20          tcp dpt:5432
+3           0        0 ACCEPT     all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+4           0        0 ACCEPT     tcp  --  *      *       172.16.0.0/24        172.20.0.10          tcp dpt:80 ctstate NEW
+5           0        0 DROP       all  --  *      *       172.20.0.0/24        172.16.0.0/24        ctstate NEW
+6           0        0 ACCEPT     icmp --  *      *       172.16.0.0/24        172.20.0.10          icmptype 8
+
+Chain OUTPUT (policy ACCEPT 0 packets, 0 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination         
+[código de saída: 0]
+
+### T1 HTTP do cliente para o dmz-web
+$ docker compose exec -T cliente curl -sS --connect-timeout 3 -o /dev/null -w HTTP %{http_code}\n http://dmz-web
+HTTP 200
+[código de saída: 0]
+
+### T2 ping do cliente para o dmz-web
+$ docker compose exec -T cliente ping -c 2 -W 2 dmz-web
+PING dmz-web (172.20.0.10): 56 data bytes
+64 bytes from 172.20.0.10: seq=0 ttl=63 time=0.534 ms
+64 bytes from 172.20.0.10: seq=1 ttl=63 time=0.072 ms
+
+--- dmz-web ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 0.072/0.303/0.534 ms
+[código de saída: 0]
+
+### T3 portas 80 e 8080 do dmz-web
+$ docker compose exec -T cliente nmap -Pn -p 80,8080 --max-retries 1 172.20.0.10
+Starting Nmap 7.97 ( https://nmap.org ) at 2026-10-20 01:51 +0000
+Nmap scan report for dmz-web (172.20.0.10)
+Host is up (0.000045s latency).
+
+PORT     STATE    SERVICE
+80/tcp   open     http
+8080/tcp filtered http-proxy
+
+Nmap done: 1 IP address (1 host up) scanned in 1.30 seconds
+[código de saída: 0]
+
+### T4 porta 5432 do banco
+$ docker compose exec -T cliente nmap -Pn -p 5432 --max-retries 1 172.20.0.20
+Starting Nmap 7.97 ( https://nmap.org ) at 2026-10-20 01:51 +0000
+Nmap scan report for dmz-db (172.20.0.20)
+Host is up.
+
+PORT     STATE    SERVICE
+5432/tcp filtered postgresql
+
+Nmap done: 1 IP address (1 host up) scanned in 2.06 seconds
+[código de saída: 0]
+
+### T5 ping do cliente para o firewall
+$ docker compose exec -T cliente ping -c 2 -W 2 172.16.0.254
+PING 172.16.0.254 (172.16.0.254): 56 data bytes
+
+--- 172.16.0.254 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[código de saída: 1]
+
+### T6a traceroute do cliente para o dmz-web
+$ docker compose exec -T cliente traceroute -m 3 -w 1 dmz-web
+traceroute to dmz-web (172.20.0.10), 3 hops max, 60 byte packets
+ 1  firewall-barbearia-firewall-1.barbearia-lan (172.16.0.254)  2.253 ms  0.027 ms  0.007 ms
+ 2  * * *
+ 3  * * *
+[código de saída: 0]
+
+### T6b iniciando responder na porta 8080 do cliente
+$ docker compose exec -T -d cliente sh -c while true; do printf 'HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok' | nc -l 8080; done
+[código de saída: 0]
+
+### T6c wget do dmz-web para o cliente (DMZ para LAN)
+$ docker compose exec -T dmz-web wget -T 3 -q -O- http://172.16.0.10:8080
+wget: download timed out
+[código de saída: 1]
+
+### T7a removendo a rota do cliente para a DMZ
+$ docker compose exec -T cliente ip route del 172.20.0.0/24
+[código de saída: 0]
+
+### T7b curl sem a rota
+$ docker compose exec -T cliente sh -c curl -sS -I --connect-timeout 3 http://dmz-web; echo "exit=$?"
+curl: (28) Connection timed out after 3000 milliseconds
+exit=28
+[código de saída: 0]
+
+### T7c curl após restaurar a rota
+$ docker compose exec -T cliente curl -sS --connect-timeout 3 -o /dev/null -w HTTP %{http_code}\n http://dmz-web
+HTTP 200
+[código de saída: 0]
+
+### Regras e contadores no final
+$ docker compose exec -T firewall iptables -L -n -v -x --line-numbers
+Chain INPUT (policy DROP 2 packets, 168 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination         
+1           0        0 ACCEPT     all  --  lo     *       0.0.0.0/0            0.0.0.0/0           
+2           0        0 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate INVALID
+3           0        0 ACCEPT     all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+
+Chain FORWARD (policy DROP 8 packets, 448 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination         
+1           0        0 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate INVALID
+2           2       88 DROP       tcp  --  *      *       172.16.0.0/24        172.20.0.20          tcp dpt:5432
+3          27     2820 ACCEPT     all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+4           3      164 ACCEPT     tcp  --  *      *       172.16.0.0/24        172.20.0.10          tcp dpt:80 ctstate NEW
+5           3      180 DROP       all  --  *      *       172.20.0.0/24        172.16.0.0/24        ctstate NEW
+6           1       84 ACCEPT     icmp --  *      *       172.16.0.0/24        172.20.0.10          icmptype 8
+
+Chain OUTPUT (policy ACCEPT 3 packets, 264 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination         
+[código de saída: 0]

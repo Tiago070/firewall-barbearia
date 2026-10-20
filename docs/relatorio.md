@@ -22,6 +22,8 @@ O banco permanece dentro da DMZ, conforme o enunciado. O fluxo da aplicação we
 
 O filtro de pacotes não inspeciona a camada 7. HTTPS na porta 443 não está implementado. A concessão de NET_ADMIN ao dmz-web amplia a superfície de ataque caso esse servidor seja comprometido. Todos os dados presentes no ambiente são fictícios.
 
+As regras de INVALID, loopback, ESTABLISHED/RELATED em INPUT e a política OUTPUT ACCEPT são regras de higiene de estado sem teste dedicado. O traceroute é evidência indireta: o salto 1 mostra o firewall; os asteriscos são compatíveis com o descarte, mas não identificam a regra.
+
 # 3. Matriz de Regras de Segurança
 
 As linhas abaixo refletem as regras e as políticas configuradas em `firewall/entrypoint.sh`. As duas últimas linhas representam políticas padrão da chain, e não regras adicionadas individualmente. Todo tráfego que não corresponde a uma regra ACCEPT ou DROP explícita é tratado pela política da chain.
@@ -39,6 +41,7 @@ As linhas abaixo refletem as regras e as políticas configuradas em `firewall/en
 | LAN (`172.16.0.0/24`) | Aplicação web (`172.20.0.10`) | ICMP echo-request | ACCEPT em FORWARD | Permite verificar a conectividade com o servidor web. |
 | Qualquer origem | Próprio firewall | Tráfego não aceito por regra anterior | DROP pela política INPUT | Mantém bloqueado por padrão o tráfego destinado ao firewall, inclusive ping para seus endereços. |
 | Qualquer origem | Qualquer destino encaminhado | Tráfego não aceito por regra anterior | DROP pela política FORWARD | Bloqueia, entre outros fluxos, o acesso da LAN à DMZ em portas não liberadas explicitamente. |
+| Firewall | Qualquer destino | Qualquer protocolo | ACCEPT pela política OUTPUT | O tráfego originado no firewall não é o alvo do controle; o foco do projeto é o tráfego entre redes na chain FORWARD. |
 
 A política de OUTPUT é ACCEPT. Portanto, o firewall não restringe por padrão os pacotes gerados por ele próprio.
 
@@ -49,10 +52,9 @@ A política de OUTPUT é ACCEPT. Portanto, o firewall não restringe por padrão
 1. Clone o repositório usando a URL fornecida ao avaliador e entre na pasta clonada:
 
    ```sh
-   git clone <https://github.com/Tiago070/firewall-barbearia> firewall-barbearia
+   git clone https://github.com/Tiago070/firewall-barbearia firewall-barbearia
    cd firewall-barbearia
    ```
-
 
 2. Crie o arquivo de configuração local a partir do exemplo:
 
@@ -83,11 +85,13 @@ Execute os comandos a partir da pasta do projeto.
 | Positivo | `docker compose exec cliente curl -fsS http://dmz-web/` | A solicitação HTTP termina com código de saída zero e retorna o conteúdo servido pelo Nginx. |
 | Positivo | `docker compose exec cliente ping -c 2 dmz-web` | Há respostas ICMP da aplicação web, pois a regra permite echo-request da LAN para esse host. |
 | Negativo | `docker compose exec cliente nmap -Pn -p 5432 172.20.0.20` | A porta 5432 aparece como filtrada, pois o acesso TCP da LAN ao banco é descartado. |
-| Negativo | `docker compose exec cliente nmap -Pn -p 22 172.20.0.10` | A porta 22 aparece como filtrada, pois não há regra que permita esse fluxo e a política de FORWARD é DROP. |
+| Negativo | `docker compose exec cliente nmap -Pn -p 8080 172.20.0.10` | A porta 8080 aparece como filtrada, pois não há regra que permita esse fluxo e a política de FORWARD é DROP. |
 | Negativo | `docker compose exec cliente ping -c 2 172.16.0.254` | Não há resposta ao ping do endereço LAN do firewall, pois o pacote é destinado ao próprio firewall e INPUT tem política DROP. |
-| Diagnóstico | `docker compose exec cliente traceroute -m 5 -w 1 dmz-db` | O primeiro salto esperado é `172.16.0.254`; não se espera resposta dos saltos seguintes até o banco. |
+| Diagnóstico | `docker compose exec cliente traceroute -m 5 -w 1 dmz-web` | O primeiro salto esperado é `172.16.0.254`; não se espera resposta dos saltos seguintes até a aplicação web. |
 
-O ping ao próprio firewall falha porque esse tráfego termina nele e passa pela chain INPUT, cuja política padrão é DROP. Isso é diferente do ping ao dmz-web, encaminhado pela chain FORWARD, para o qual há uma regra ICMP explícita. No traceroute até o banco, o primeiro salto identifica o firewall; os probes seguintes não obtêm resposta porque o acesso da LAN ao banco é bloqueado e o banco não tem rota configurada para a LAN.
+O ping ao próprio firewall falha porque esse tráfego termina nele e passa pela chain INPUT, cuja política padrão é DROP. Isso é diferente do ping ao dmz-web, encaminhado pela chain FORWARD, para o qual há uma regra ICMP explícita. No traceroute até o dmz-web, o primeiro salto identifica o firewall; os probes seguintes não obtêm resposta porque o firewall descarta os probes.
+
+Teste de isolamento: remova a rota do cliente para a DMZ com `docker compose exec -T cliente ip route del 172.20.0.0/24` e execute `docker compose exec -T cliente sh -c curl -sS -I --connect-timeout 3 http://dmz-web; echo "exit=$?"`. O resultado observado no log foi `curl: (28) Connection timed out after 3000 milliseconds` com `exit=28`. A falha ocorre apenas após remover a rota e o serviço volta a responder quando a rota é restaurada, o que comprova que o firewall é o único caminho entre a LAN e a DMZ.
 
 Para conferir a política carregada e os contadores:
 
@@ -99,21 +103,23 @@ Anote os contadores antes e depois de executar os testes negativos. O incremento
 
 ## Comparação das evidências antes e depois
 
-A pasta `docs/evidencias` não contém arquivos com resultados dos testes; contém apenas o marcador `.gitkeep`. Assim, não há valores medidos que possam ser atribuídos a uma execução antes ou depois das regras. A tabela registra essa ausência sem substituir medições por resultados esperados.
+Os valores desta tabela foram extraídos dos arquivos `docs/evidencias/antes-das-regras.txt` e `docs/evidencias/depois-das-regras.txt`.
 
-| Teste/indicador | Antes das regras, valor em `docs/evidencias` | Depois das regras, valor em `docs/evidencias` |
-|---|---|---|
-| Acesso HTTP do cliente à aplicação web | Não registrado | Não registrado |
-| Acesso TCP do cliente ao PostgreSQL na porta 5432 | Não registrado | Não registrado |
-| Acesso do cliente à porta 22 do dmz-web | Não registrado | Não registrado |
-| Ping do cliente ao firewall | Não registrado | Não registrado |
-| Traceroute do cliente até o banco | Não registrado | Não registrado |
-| Contadores da chain FORWARD | Não registrado | Não registrado |
-
-Os resultados esperados para a configuração atual estão descritos na tabela de testes acima; para preencher esta comparação com resultados observados, execute os testes e salve as saídas correspondentes em `docs/evidencias`.
+| Teste | Comando | Antes das regras | Depois das regras | Regra responsável |
+|---|---|---|---|---|
+| HTTP do cliente para o dmz-web | `docker compose exec -T cliente curl -sS --connect-timeout 3 -o /dev/null -w HTTP %{http_code}\n http://dmz-web` | `HTTP 200` | `HTTP 200` | não medido |
+| Ping do cliente para o dmz-web | `docker compose exec -T cliente ping -c 2 -W 2 dmz-web` | `2 packets transmitted, 2 packets received, 0% packet loss` | `2 packets transmitted, 2 packets received, 0% packet loss` | não medido |
+| Porta 80 e 8080 do dmz-web | `docker compose exec -T cliente nmap -Pn -p 80,8080 --max-retries 1 172.20.0.10` | `80/tcp open http` e `8080/tcp closed http-proxy` | `80/tcp open http` e `8080/tcp filtered http-proxy` | Política DROP de FORWARD: incremento de 2 pacotes e 88 bytes |
+| Porta 5432 do banco | `docker compose exec -T cliente nmap -Pn -p 5432 --max-retries 1 172.20.0.20` | `5432/tcp open postgresql` | `5432/tcp filtered postgresql` | Regra DROP TCP/5432: incremento de 2 pacotes e 88 bytes |
+| Ping do cliente para o firewall | `docker compose exec -T cliente ping -c 2 -W 2 172.16.0.254` | `2 packets transmitted, 2 packets received, 0% packet loss` | `2 packets transmitted, 0 packets received, 100% packet loss` | Política DROP de INPUT: incremento de 2 pacotes e 168 bytes |
+| Traceroute do cliente para o dmz-web | `docker compose exec -T cliente traceroute -m 3 -w 1 dmz-web` | `1  firewall-barbearia-firewall-1.barbearia-lan (172.16.0.254) ... 2  dmz-web (172.20.0.10)` | `1  firewall-barbearia-firewall-1.barbearia-lan (172.16.0.254) ... 2  * * *` | não medido |
+| Wget do dmz-web para o cliente | `docker compose exec -T dmz-web wget -T 3 -q -O- http://172.16.0.10:8080` | `ok` | `wget: download timed out` | Regra DROP de novas conexões DMZ para LAN: incremento de 3 pacotes e 180 bytes |
+| Curl sem rota do cliente para a DMZ | `docker compose exec -T cliente sh -c curl -sS -I --connect-timeout 3 http://dmz-web; echo "exit=$?"` | `curl: (28) Connection timed out after 3000 milliseconds` e `exit=28` | `curl: (28) Connection timed out after 3000 milliseconds` e `exit=28` | não medido |
 
 ## Referências
 
-- NIST SP 800-41 Rev. 1 (Scarfone e Hoffman, 2009).
-- Lei nº 13.709/2018.
-- Documentação do Netfilter em netfilter.org.
+- SCARFONE, K.; HOFFMAN, P. Guidelines on firewalls and firewall policy. Gaithersburg: National Institute of Standards and Technology, 2009. Disponível em: https://csrc.nist.gov/publications/detail/sp/800-41/rev-1/final. Acesso em: 19 out. 2026.
+- BRASIL. Lei nº 13.709, de 14 de agosto de 2018. Lei Geral de Proteção de Dados Pessoais (LGPD). Brasília, DF: Presidência da República, 2018. Disponível em: https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2018/lei/L13709.htm. Acesso em: 19 out. 2026.
+- NETFILTER. Netfilter and iptables project documentation. Disponível em: https://www.netfilter.org/documentation/. Acesso em: 19 out. 2026.
+
+A política deny-by-default foi recomendada por Scarfone e Hoffman (2009) como prática de firewall com regras explícitas e bloqueio por padrão. Os dados pessoais fictícios deste ambiente estão protegidos pela Lei Geral de Proteção de Dados Pessoais, que exige medidas adequadas de segurança e minimização de dados (BRASIL, 2018). A arquitetura do laboratório segue a organização do Netfilter, cujos hooks e mecanismos de filtragem são documentados no projeto oficial (NETFILTER, s.d.).

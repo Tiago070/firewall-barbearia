@@ -123,7 +123,31 @@ Se executar traceroute até a DMZ, o primeiro salto deve ser `172.16.0.254` e os
 Comando para observar esse caminho:
 
 ```sh
-docker compose exec cliente traceroute -m 5 -w 1 dmz-db
+docker compose exec cliente traceroute -m 5 -w 1 dmz-web
+```
+
+### Teste de isolamento da rota
+
+Remova a rota do cliente para a DMZ e faça a solicitação HTTP:
+
+```sh
+docker compose exec cliente ip route del 172.20.0.0/24
+docker compose exec cliente sh -c 'curl -sS -I --connect-timeout 3 http://dmz-web; echo "exit=$?"'
+```
+
+Resultado esperado: o `curl` termina por timeout e mostra `exit=28`. Para restaurar a rota, reinicie o cliente:
+
+```sh
+docker compose restart cliente
+```
+
+### Gerar evidências
+
+Execute os comandos a partir da raiz do repositório. No Windows, use o Git Bash:
+
+```sh
+bash tests/coletar-evidencias.sh antes
+bash tests/coletar-evidencias.sh depois
 ```
 
 ## Contadores do firewall

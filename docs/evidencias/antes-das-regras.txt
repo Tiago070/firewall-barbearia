@@ -1,5 +1,5 @@
 # Evidências: firewall antes das regras
-Gerado em: 2026-10-19 22:50:42 -0300
+Gerado em: 2026-10-19 23:21:02 -0300
 
 ### Abrindo o firewall (sem regras, políticas ACCEPT)
 $ docker compose exec -T firewall sh -c iptables -F; iptables -P INPUT ACCEPT; iptables -P FORWARD ACCEPT; iptables -P OUTPUT ACCEPT
@@ -8,10 +8,10 @@ $ docker compose exec -T firewall sh -c iptables -F; iptables -P INPUT ACCEPT; i
 ### Containers em execução
 $ docker compose ps
 NAME                            IMAGE                         COMMAND                  SERVICE    CREATED          STATUS          PORTS
-firewall-barbearia-cliente-1    firewall-barbearia-cliente    "/bin/sh -c 'ip rout…"   cliente    15 seconds ago   Up 13 seconds   
+firewall-barbearia-cliente-1    firewall-barbearia-cliente    "/bin/sh -c 'ip rout…"   cliente    30 minutes ago   Up 28 minutes   
 firewall-barbearia-dmz-db-1     postgres:16-alpine            "docker-entrypoint.s…"   dmz-db     11 days ago      Up 9 hours      5432/tcp
 firewall-barbearia-dmz-web-1    nginx:alpine                  "/docker-entrypoint.…"   dmz-web    11 days ago      Up 9 hours      80/tcp
-firewall-barbearia-firewall-1   firewall-barbearia-firewall   "/usr/local/bin/entr…"   firewall   17 seconds ago   Up 14 seconds   
+firewall-barbearia-firewall-1   firewall-barbearia-firewall   "/usr/local/bin/entr…"   firewall   29 minutes ago   Up 29 minutes   
 [código de saída: 0]
 
 ### Regras no início
@@ -34,55 +34,79 @@ HTTP 200
 ### T2 ping do cliente para o dmz-web
 $ docker compose exec -T cliente ping -c 2 -W 2 dmz-web
 PING dmz-web (172.20.0.10): 56 data bytes
-64 bytes from 172.20.0.10: seq=0 ttl=63 time=0.979 ms
-64 bytes from 172.20.0.10: seq=1 ttl=63 time=0.150 ms
+64 bytes from 172.20.0.10: seq=0 ttl=63 time=0.808 ms
+64 bytes from 172.20.0.10: seq=1 ttl=63 time=0.152 ms
 
 --- dmz-web ping statistics ---
 2 packets transmitted, 2 packets received, 0% packet loss
-round-trip min/avg/max = 0.150/0.564/0.979 ms
+round-trip min/avg/max = 0.152/0.480/0.808 ms
+[código de saída: 0]
+
+### Contadores da chain FORWARD após o teste anterior
+$ docker compose exec -T firewall iptables -L FORWARD -n -v -x --line-numbers
+Chain FORWARD (policy ACCEPT 16 packets, 1638 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination         
 [código de saída: 0]
 
 ### T3 portas 80 e 8080 do dmz-web
 $ docker compose exec -T cliente nmap -Pn -p 80,8080 --max-retries 1 172.20.0.10
-Starting Nmap 7.97 ( https://nmap.org ) at 2026-10-20 01:50 +0000
+Starting Nmap 7.97 ( https://nmap.org ) at 2026-10-20 02:21 +0000
 Nmap scan report for dmz-web (172.20.0.10)
-Host is up (0.00014s latency).
+Host is up (0.00012s latency).
 
 PORT     STATE  SERVICE
 80/tcp   open   http
 8080/tcp closed http-proxy
 
-Nmap done: 1 IP address (1 host up) scanned in 0.08 seconds
+Nmap done: 1 IP address (1 host up) scanned in 0.11 seconds
+[código de saída: 0]
+
+### Contadores da chain FORWARD após o teste anterior
+$ docker compose exec -T firewall iptables -L FORWARD -n -v -x --line-numbers
+Chain FORWARD (policy ACCEPT 21 packets, 1850 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination         
 [código de saída: 0]
 
 ### T4 porta 5432 do banco
 $ docker compose exec -T cliente nmap -Pn -p 5432 --max-retries 1 172.20.0.20
-Starting Nmap 7.97 ( https://nmap.org ) at 2026-10-20 01:50 +0000
+Starting Nmap 7.97 ( https://nmap.org ) at 2026-10-20 02:21 +0000
 Nmap scan report for dmz-db (172.20.0.20)
-Host is up (0.00063s latency).
+Host is up (0.00038s latency).
 
 PORT     STATE SERVICE
 5432/tcp open  postgresql
 
-Nmap done: 1 IP address (1 host up) scanned in 0.10 seconds
+Nmap done: 1 IP address (1 host up) scanned in 0.08 seconds
+[código de saída: 0]
+
+### Contadores da chain FORWARD após o teste anterior
+$ docker compose exec -T firewall iptables -L FORWARD -n -v -x --line-numbers
+Chain FORWARD (policy ACCEPT 23 packets, 1934 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination         
 [código de saída: 0]
 
 ### T5 ping do cliente para o firewall
 $ docker compose exec -T cliente ping -c 2 -W 2 172.16.0.254
 PING 172.16.0.254 (172.16.0.254): 56 data bytes
-64 bytes from 172.16.0.254: seq=0 ttl=64 time=1.140 ms
-64 bytes from 172.16.0.254: seq=1 ttl=64 time=0.131 ms
+64 bytes from 172.16.0.254: seq=0 ttl=64 time=0.384 ms
+64 bytes from 172.16.0.254: seq=1 ttl=64 time=0.128 ms
 
 --- 172.16.0.254 ping statistics ---
 2 packets transmitted, 2 packets received, 0% packet loss
-round-trip min/avg/max = 0.131/0.635/1.140 ms
+round-trip min/avg/max = 0.128/0.256/0.384 ms
+[código de saída: 0]
+
+### Contadores da chain INPUT após o teste anterior
+$ docker compose exec -T firewall iptables -L INPUT -n -v -x --line-numbers
+Chain INPUT (policy ACCEPT 2 packets, 168 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination         
 [código de saída: 0]
 
 ### T6a traceroute do cliente para o dmz-web
 $ docker compose exec -T cliente traceroute -m 3 -w 1 dmz-web
 traceroute to dmz-web (172.20.0.10), 3 hops max, 60 byte packets
- 1  firewall-barbearia-firewall-1.barbearia-lan (172.16.0.254)  0.454 ms  0.028 ms  0.006 ms
- 2  dmz-web (172.20.0.10)  0.020 ms  0.010 ms  0.011 ms
+ 1  firewall-barbearia-firewall-1.barbearia-lan (172.16.0.254)  0.378 ms  0.213 ms  0.173 ms
+ 2  dmz-web (172.20.0.10)  0.164 ms  0.098 ms  0.073 ms
 [código de saída: 0]
 
 ### T6b iniciando responder na porta 8080 do cliente
@@ -93,13 +117,19 @@ $ docker compose exec -T -d cliente sh -c while true; do printf 'HTTP/1.1 200 OK
 $ docker compose exec -T dmz-web wget -T 3 -q -O- http://172.16.0.10:8080
 ok[código de saída: 0]
 
+### Contadores da chain FORWARD após o teste anterior
+$ docker compose exec -T firewall iptables -L FORWARD -n -v -x --line-numbers
+Chain FORWARD (policy ACCEPT 45 packets, 3509 bytes)
+num      pkts      bytes target     prot opt in     out     source               destination         
+[código de saída: 0]
+
 ### T7a removendo a rota do cliente para a DMZ
 $ docker compose exec -T cliente ip route del 172.20.0.0/24
 [código de saída: 0]
 
 ### T7b curl sem a rota
 $ docker compose exec -T cliente sh -c curl -sS -I --connect-timeout 3 http://dmz-web; echo "exit=$?"
-curl: (28) Connection timed out after 3000 milliseconds
+curl: (28) Connection timed out after 3002 milliseconds
 exit=28
 [código de saída: 0]
 

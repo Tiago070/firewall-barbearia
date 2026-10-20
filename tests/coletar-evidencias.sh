@@ -35,6 +35,13 @@ cmd() {
   echo "[código de saída: $?]"
 }
 
+# Mostra os contadores de uma chain. Lido logo após cada teste, permite atribuir o
+# incremento de pacotes à regra responsável (compare com o snapshot anterior).
+contadores() {
+  cmd "Contadores da chain $1 após o teste anterior" \
+    docker compose exec -T firewall iptables -L "$1" -n -v -x --line-numbers
+}
+
 # Reinicia o cliente: encerra o responder do teste T6 e recria a rota estática pelo firewall.
 reiniciar_cliente() {
   docker compose restart cliente >/dev/null 2>&1
@@ -73,12 +80,16 @@ executar() {
     docker compose exec -T cliente curl -sS --connect-timeout 3 -o /dev/null -w "HTTP %{http_code}\n" http://dmz-web
   cmd "T2 ping do cliente para o dmz-web" \
     docker compose exec -T cliente ping -c 2 -W 2 dmz-web
+  contadores FORWARD
   cmd "T3 portas 80 e 8080 do dmz-web" \
     docker compose exec -T cliente nmap -Pn -p 80,8080 --max-retries 1 172.20.0.10
+  contadores FORWARD
   cmd "T4 porta 5432 do banco" \
     docker compose exec -T cliente nmap -Pn -p 5432 --max-retries 1 172.20.0.20
+  contadores FORWARD
   cmd "T5 ping do cliente para o firewall" \
     docker compose exec -T cliente ping -c 2 -W 2 172.16.0.254
+  contadores INPUT
   cmd "T6a traceroute do cliente para o dmz-web" \
     docker compose exec -T cliente traceroute -m 3 -w 1 dmz-web
 
@@ -89,6 +100,7 @@ executar() {
   sleep 2
   cmd "T6c wget do dmz-web para o cliente (DMZ para LAN)" \
     docker compose exec -T dmz-web wget -T 3 -q -O- http://172.16.0.10:8080
+  contadores FORWARD
   reiniciar_cliente
 
   # T7: isolamento. Sem a rota pelo firewall, o cliente não alcança a DMZ.
